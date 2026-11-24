@@ -1,0 +1,36 @@
+%%{init: {'flowchart': {'curve': 'linear'}}}%%
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	route(route)
+	retrieve(retrieve)
+	exam_images(exam_images)
+	materials(materials)
+	resources(resources)
+	catalogue(catalogue)
+	compose(compose)
+	provider(provider)
+	generate(generate)
+	persist(persist)
+	visual(visual)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> route;
+	catalogue --> compose;
+	compose --> provider;
+	exam_images --> compose;
+	generate --> persist;
+	materials --> compose;
+	persist --> visual;
+	provider --> generate;
+	resources --> compose;
+	visual --> __end__;
+	route -.-> resources;
+	route -.-> catalogue;
+	route -.-> retrieve;
+	retrieve -.-> __end__;
+	retrieve -.-> exam_images;
+	retrieve -.-> materials;
+	retrieve -.-> resources;
+	classDef default fill:#f2f0ff,line-height:1.2;
+	classDef first fill-opacity:0;
+	classDef last fill:#bfb6fc;
+

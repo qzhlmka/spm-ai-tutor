@@ -1,0 +1,9 @@
+# Phase 2 pilot — textbooks only (user, 2026-10-09). Paths relative to ~/Desktop/knowledge bases.
+# Chosen so >= 20 golden items point at pilot docs, covering every subject and both languages.
+physics/Textbook Physics Form 4 (English).pdf
+physics/Textbook Physics Form 5 (English).pdf
+physics/Textbook Physics Form 5 (Malay).pdf
+mathematics/Textbook Maths Form 4 (Eng).pdf
+additional mathematics/DLP Additional Mathematics Form 4.pdf
+sejarah/Buku Teks Sejarah T4.pdf
+chemistry/Chemistry Form 5 KSSM.pdf

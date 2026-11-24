@@ -1,0 +1,26 @@
+-- Which LLM provider answers in this conversation. Null means "use the default"
+-- (DEFAULT_PROVIDER in src/lib/providers.ts) — every conversation predating this
+-- column, and every new one until the student touches the picker.
+--
+-- Stored per conversation rather than per user so the same person can compare
+-- providers on the same question without flipping a global setting, and so a
+-- conversation reads back the way it was actually answered.
+--
+-- Deliberately NOT a foreign key or an enum: which providers exist is decided by
+-- which credentials the deployment holds, which is an env-var question, not a
+-- schema one. A conversation naming a provider that has since been unconfigured
+-- falls back at read time (resolveProvider) rather than failing, so an
+-- unrecognised value here is a recoverable state, not corruption.
+--
+-- The application treats this column as OPTIONAL at runtime: chat-handler.ts
+-- catches the "column does not exist" error (42703) and falls back to the
+-- default provider, so deploying the code before running this migration
+-- degrades to current behaviour instead of breaking every turn.
+--
+-- Note this has to be caught on the READ as well as the write, and the read is
+-- the dangerous one. PostgREST fails the entire request when a selected column
+-- is missing instead of omitting it, so an unguarded select of `provider` on
+-- the conversation lookup 500s every turn that carries a conversationId --
+-- i.e. everything after the first message of a conversation.
+alter table conversations
+  add column if not exists provider text;

@@ -1,0 +1,26 @@
+node_modules/
+dist/
+
+# Secrets — never commit. Both are documented in the matching .env.example.
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Vision-OCR cache for ingested PDFs (currently ~1.3 GB) — regenerable, and
+# keyed to local source-PDF paths, so it is worthless to anyone else.
+.cache/
+
+# Ingestion dry-run output, reviewed locally then discarded.
+*_chunks_review.json
+
+.DS_Store
+.claude/
+
+# Supabase CLI local state (project ref, pooler URL, linked-project cache).
+supabase/.temp/
+supabase/.branches/
+.ocr-cache/
+notes-topics.json

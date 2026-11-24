@@ -1,0 +1,308 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+@plugin "@tailwindcss/typography";
+
+/* The app is dark-only ("Night revision", chosen 2026-10-16 from the design
+   canvas of three directions). Every component already pairs its classes as
+   `x dark:y`, so dark: is pinned to the `dark` class on <html> (index.html)
+   rather than to the OS setting, and the tokens below have one set. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tailwind's stock `neutral` ramp is a pure/warm grey, which reads muddy next
+   to the brand blue. Components use `text-neutral-*`/`bg-neutral-*` in ~200
+   places, so the ramp is remapped here once — a cool, blue-biased slate that
+   harmonizes with the brand — instead of rewriting every call site.
+
+   The mid-steps are deliberately compressed: components pair steps per mode
+   (`text-neutral-500 dark:text-neutral-400` for muted, `700`/`300` for body,
+   `800`/`100` for headings), so 400 and 500 each carry text duty on BOTH a
+   white and a near-black ground. Those pull in opposite directions, so each is
+   tuned to the best crossover rather than to one mode:
+     - 500: 4.94:1 on white, 4.55:1 on paper (AA body, its light-mode role)
+     - 400: 4.75:1 on dark surface (AA body, its dark-mode role); 3.62:1 on
+       white, which clears AA-large/UI for the handful of light-mode
+       de-emphasis uses. Tailwind's own neutral-400 is 2.60:1 there, so this
+       is strictly better than the default it replaces. */
+@theme {
+  --color-neutral-50: #f5f8fa;
+  --color-neutral-100: #e9eff4;
+  --color-neutral-200: #d8e2ea;
+  --color-neutral-300: #bcccd9;
+  --color-neutral-400: #7289a0;
+  --color-neutral-500: #5c7386;
+  --color-neutral-600: #46596a;
+  --color-neutral-700: #344453;
+  --color-neutral-800: #222e3a;
+  --color-neutral-900: #141d26;
+  --color-neutral-950: #0b1117;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Space Grotesk for headings and the wordmark, IBM Plex Sans for long tutor
+     explanations (clear numerals for maths), IBM Plex Mono for exam labels
+     ("KELANTAN 2023 · SOALAN 10") and other small data. */
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* The brand green is the action colour here: on a near-black ground
+     it reads at 11:1, where the logo blue (#0f75bd) would be 3.6:1. Because
+     green is light, anything filled with it carries dark text
+     (--color-on-brand), never white (1.6:1). The logo blue, lifted, stays as
+     the second colour. */
+  --color-brand: #a5d95f;
+  --color-brand-hover: #c6ec8f;
+  --color-on-brand: #0c141c;
+  --color-accent: #4ea8e8;
+  --color-accent-text: #a5d95f;
+  --color-ink: #e3eaf1;
+  --color-paper: #0c141c;
+  --color-surface: #131f2b;
+  --color-line: #24344a;
+  --color-muted: #8fa1b2;
+  /* Exam pages and figures are scans on white paper; they sit on this warm
+     paper panel instead of floating as bright rectangles on the dark ground. */
+  --color-exam-paper: #f7f5ee;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--color-ink);
+  background-color: var(--color-paper);
+  font-family: var(--font-body);
+  /* Was a set of Inter-specific character variants (cv02/cv03/…) that Plus
+     Jakarta Sans doesn't define, so they silently did nothing. Lining +
+     proportional figures is what this app actually wants: maths content and
+     usage/cost readouts should have evenly-weighted digits. */
+  font-variant-numeric: lining-nums proportional-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Display face carries the headings: tight leading and slight negative
+   tracking, which Space Grotesk needs at heading sizes. Body copy keeps its
+   generous line-height (set per-component).
+
+   Deliberately inside @layer base: these are DEFAULTS. Unlayered rules
+   outrank Tailwind's @layer utilities, so declaring font-weight/tracking
+   without a layer would silently override every `font-semibold`/`tracking-*`
+   utility a component sets on a heading. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+}
+
+/* Small uppercase labels (section eyebrows, field labels) need the opposite
+   treatment — positive tracking, or the caps crowd. */
+.label-caps {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+/* Exam source labels and other small data. */
+.font-mono-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+/* A diagram from a real exam or textbook page, on paper. */
+.exam-paper {
+  background-color: var(--color-exam-paper);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+/* Columns of digits (usage figures, chunk counts) line up. */
+.tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+@layer components {
+  /* Flat, bordered surfaces — no blur, no translucency. Intentionally inside
+     @layer components (not unlayered) so call sites can still zero out the
+     radius/border on specific edges via plain Tailwind utilities
+     (rounded-none, border-x-0, etc.) for flush docked bars — utilities in
+     Tailwind's own utilities layer always win over @layer components for the
+     same property, regardless of className order. The one thing NOT to pair
+     with .surface/.field is a Tailwind shadow- utility, since that same rule
+     would silently clobber the custom box-shadow below.
+
+     Shadows are layered (a tight contact shadow plus a wider ambient one) and
+     tinted with the palette's blue rather than neutral black — a single
+     1px/3px grey shadow is what made these cards read as flat and unfinished.
+     Still restraint, not a glow: no blur, no spread halo. */
+  .surface {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 14px;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  }
+
+  .field {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  /* A brand-tinted ring on top of the border colour change, so focus is
+     unmistakable rather than a 1px hue shift a keyboard user can miss. */
+  .field:focus,
+  .field:focus-within {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent);
+  }
+
+  /* User chat bubble: a raised slate, so the green stays for actions. */
+  .bubble-user {
+    background-color: #1a2836;
+    border: 1px solid var(--color-line);
+  }
+}
+
+/* Keyboard focus for everything that isn't a .field (buttons, links, nav
+   items). Uses :focus-visible so it doesn't fire when a BUTTON is clicked. */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* ...but text fields are the exception to that. Browsers always match
+   :focus-visible on a text input or textarea, even on a mouse click, because
+   the user is about to type there. So clicking the chat box drew this 2px
+   outline as a second rectangle INSIDE the composer, on top of the .field
+   ring the composer already shows. Every .field text input (login, rename,
+   search, link forms) had the same doubled border.
+
+   The `outline-none` those elements carry could not stop it: Tailwind v4 puts
+   utilities in a cascade layer, and this rule is unlayered — unlayered CSS
+   beats layered CSS regardless of specificity. So the override has to live
+   here, unlayered too.
+
+   Only text-entry elements that already have the .field ring lose the outline,
+   so none of them is left without a focus indicator: the ring IS their
+   indicator. Buttons, links and dropdowns keep the outline, including the
+   provider picker inside the composer, where a keyboard user needs to see
+   which control they're on. */
+input.field:focus-visible,
+textarea.field:focus-visible,
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: none;
+}
+
+/* Liquid orb (empty-chat greeting icon): three blurred, differently-timed
+   blobs layered inside a circular mask so they read as one wavy, breathing
+   shape rather than a static dot. The blob colours trace the logo itself —
+   brand blue into its lighter tint, with the brand green surfacing last — so
+   the app's one animated moment is also where the brand is most legible. */
+.siri-orb {
+  position: relative;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+}
+
+.siri-orb-blob {
+  position: absolute;
+  inset: -20%;
+  filter: blur(6px);
+  mix-blend-mode: normal;
+}
+
+.siri-orb-blob-a {
+  background: radial-gradient(circle at 30% 30%, var(--color-brand), transparent 65%);
+  animation: siri-drift-a 5.5s ease-in-out infinite;
+}
+
+.siri-orb-blob-b {
+  background: radial-gradient(circle at 70% 40%, var(--color-brand-hover), transparent 60%);
+  animation: siri-drift-b 6.5s ease-in-out infinite;
+  opacity: 0.9;
+}
+
+.siri-orb-blob-c {
+  background: radial-gradient(circle at 50% 70%, var(--color-accent), transparent 55%);
+  animation: siri-drift-c 4.5s ease-in-out infinite;
+  opacity: 0.75;
+}
+
+@keyframes siri-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+  50% { transform: translate(6%, -4%) scale(1.12); border-radius: 63% 37% 41% 59% / 55% 46% 54% 45%; }
+}
+
+@keyframes siri-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); border-radius: 55% 45% 38% 62% / 60% 40% 60% 40%; }
+  50% { transform: translate(-8%, 6%) scale(1.08); border-radius: 40% 60% 60% 40% / 45% 55% 45% 55%; }
+}
+
+@keyframes siri-drift-c {
+  0%, 100% { transform: translate(0, 0) scale(1); border-radius: 50% 50% 35% 65% / 50% 45% 55% 50%; }
+  50% { transform: translate(4%, 8%) scale(1.15); border-radius: 65% 35% 55% 45% / 40% 60% 40% 60%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .siri-orb-blob-a,
+  .siri-orb-blob-b,
+  .siri-orb-blob-c {
+    animation: none;
+  }
+}
+
+/* KaTeX display blocks can be wider than the message column on small screens */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-enter {
+  animation: message-enter 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-enter {
+    animation: none;
+  }
+}

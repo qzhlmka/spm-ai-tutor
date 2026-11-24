@@ -1,0 +1,17 @@
+# Phase 4: every textbook in the corpus (16). Pilot books are a subset (pilot-docs.txt).
+additional mathematics/DLP Additional Mathematics Form 4.pdf
+additional mathematics/MT DLP KSSM T5_6233333650692243837.pdf
+chemistry/Chemistry Form 5 KSSM.pdf
+chemistry/DLP TEXTBOOK Chemistry FORM 4.pdf
+chemistry/Kimia Tingkatan 5 KSSM.pdf
+chemistry/Textbook Kimia Form 4 (BM).pdf
+mathematics/Textbook Maths Form 4 (BM).pdf
+mathematics/Textbook Maths Form 4 (Eng).pdf
+mathematics/Textbook Maths Form 5 (BM).pdf
+mathematics/Textbook Maths Form 5 (Eng).pdf
+physics/Textbook Physics Form 4 (English).pdf
+physics/Textbook Physics Form 4 (Malay).pdf
+physics/Textbook Physics Form 5 (English).pdf
+physics/Textbook Physics Form 5 (Malay).pdf
+sejarah/Buku Teks Sejarah T4.pdf
+sejarah/Buku Teks Sejarah T5.pdf
