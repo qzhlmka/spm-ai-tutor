@@ -1,163 +1,131 @@
-# study-assistant
+# SPM AI Tutor
 
-A retrieval-augmented tutor for Malaysian **SPM / KSSM** schoolwork, covering Additional
-Mathematics, Physics, Chemistry, Sejarah and other subjects.
+A retrieval-augmented AI tutor for Malaysian **SPM / KSSM** secondary-school students (Form 4–5), covering Additional Mathematics, Mathematics, Physics, Chemistry and Sejarah (History) in both **English and Malay**.
 
-Textbook and past-year-question PDFs are ingested into a Supabase/pgvector store. A student
-asks a question, relevant material is retrieved across the whole knowledge base, and the tutor
-answers from its own knowledge grounded in that material and in the KSSM/SPM syllabus.
-Teachers can upload their own class notes, which the tutor then teaches from as authoritative
-material for their students.
+Students ask questions in plain language, upload a photo of their homework, or ask for past-year exam questions. The tutor answers **only from the material it retrieves**: KSSM textbooks, past-year trial papers and their teachers' uploaded class notes. A student can therefore see where every fact came from. Teachers upload their own notes, which the tutor then teaches from as the authoritative source.
 
-The tutor is scoped to SPM schoolwork only — off-topic requests, jailbreaks, and
-persona-override attempts are declined by the system prompt.
+> **Stack:** TypeScript · Fastify · React + Vite + Tailwind · Supabase Postgres + pgvector · LangGraph · Claude Sonnet 5 (tutor) · GPT-4.1 (OCR / chunking) · multilingual-e5 embeddings (local) · Langfuse tracing · Railway
 
-## Stack
+---
 
-| | |
+## What it does
+
+- **Strictly grounded tutoring.** The tutor may *apply* a retrieved method to the student's own numbers, but it may not assert a formula, date or definition that isn't in the retrieved material. When nothing relevant is found, it says so instead of answering from memory.
+- **Bilingual retrieval across a language-partitioned corpus.** Maths and Physics sources are in English; Sejarah and most teacher notes are in Malay. A query-side glossary rewrites Malay curriculum terms so a Malay question can still reach English material.
+- **Past-year questions by exam.** "Soalan percubaan fizik Kedah 2025 tentang gelombang" goes through an exact filter on exam year and state, not a similarity search. "Johor 2013" therefore gets an honest *"I have 2021–2023, not 2013"* instead of a near-miss from another paper.
+- **The real diagram, not a redrawn one.** Many exam questions depend on a diagram that text can't capture. The tutor is shown the original rendered exam page and shows it to the student, cropped to the figure.
+- **Teacher materials.** Teachers upload PDFs, which are always vision-OCR'd because slide decks hide diagrams as images. The tutor teaches from them, and the source files appear in a side panel when an answer drew on them.
+- **Guide, don't tell.** Students are coached through calculations and homework with hints that escalate. Concepts and definitions are taught in full. Teachers get full worked solutions and marking schemes immediately.
+- **Multiple model providers.** Claude, GPT or a Malaysian LLM can be chosen per conversation, with a per-student daily spending cap enforced from real token costs.
+- **Image and PDF attachments.** A student can photograph a question and ask about it.
+
+## Architecture
+
+Each chat turn runs as a **LangGraph state graph**:
+
+```mermaid
+graph TD;
+  start([start]) --> route
+  route -.-> retrieve
+  route -.-> catalogue
+  route -.-> resources
+  retrieve -.-> exam_images
+  retrieve -.-> materials
+  retrieve -.-> resources
+  exam_images --> compose
+  materials --> compose
+  resources --> compose
+  catalogue --> compose
+  compose --> provider --> generate --> persist --> visual --> done([end])
+```
+
+| Node | Job |
 |---|---|
-| Backend | Fastify + TypeScript (JSON API only — serves no HTML) |
-| Frontend | Vite + React + TypeScript + Tailwind, KaTeX for maths |
-| Database | Supabase Postgres + `pgvector` |
-| Auth | Supabase Auth (JWT bearer token) |
-| Tutor model | Anthropic `claude-haiku-4-5` |
-| Vision / OCR / chunking | OpenAI `gpt-4.1` |
-| Embeddings | `multilingual-e5-base`, 768-dim, run **locally in-process** — no per-token cost |
+| `route` | Classifies the turn (schoolwork / small talk / off-topic / app help / "what do you have"). Cheap rules run first, then a forced tool call. In parallel it rewrites the follow-up as a standalone question and detects file requests. |
+| `retrieve` | Up to seven parallel lanes merged into a 12-chunk context: hybrid BM25 + vector search (RRF), the Malay→English rewrite, the standalone rewrite, teacher materials (vector + an LLM relevance judge), teacher keyword search (IDF) and the exam-label filter. |
+| `exam_images` | Finds which retrieved exam questions need their diagram, locates the figure on the stored page image and crops it. |
+| `materials` | Decides which teacher files to list beside the answer. This uses a stricter relevance test than the one for admitting context. |
+| `catalogue` | Answers "how many Chemistry topics do you have?" from the database rather than from whatever retrieval happened to return. |
+| `generate` → `persist` → `visual` | Calls the chosen provider, saves the turn, and draws a diagram only when the student asked for one. |
 
-## Quick start
+The chat logic lives once, in `src/lib/chat-handler.ts`. It has two entry points: a **Fastify server** for production (`src/server.ts`) and a **Vite dev-server plugin** (`frontend/vite-plugins/api.ts`) that serves the UI and the API on one port for local development.
 
-Requires Node 22+ (developed on 24), and `pdftoppm` (poppler) if you plan to OCR scanned PDFs.
+### Ingestion pipeline
+
+```
+PDF ─► text layer (pdf-parse)  or  page render (pdftoppm) + GPT-4.1 vision OCR
+    ─► 6-page batches ─► GPT-4.1 chunker → typed chunks
+       (concept · worked_example · past_year_question · formula · common_mistake)
+    ─► multilingual-e5-base embedding (local, int8) ─► Postgres / pgvector
+```
+
+- The chunker must keep a worked example together with its solution, even when the solution is on a later page.
+- The chunker may never invent an answer to fill a gap. Every chunk is tagged with whether its answer came from the source.
+- Answer keys printed in a separate file are matched to their questions **in code**, never by the model. When the model was asked to do the matching, it renumbered the questions in every batch and attached 338 plausible-looking wrong answers.
+
+## Engineering decisions, with measurements
+
+Every tuning decision was measured against the real knowledge base before shipping. The details sit next to each constant in the code.
+
+| Problem | What was measured | Outcome |
+|---|---|---|
+| Retrieval quality | 47-item golden set, Recall@5 / MRR | Baseline **0.708 / 0.648** → **0.872 / 0.766** after removing book front/back matter, adding hybrid BM25 + vector search with RRF fusion, and repairing broken maths glyphs in the PDF text layer |
+| A similarity cutoff for teacher notes | Distribution of relevant vs irrelevant chunks | The ranges overlapped completely (relevant as low as 0.744, irrelevant up to 0.869), so no single cutoff works. Replaced with an **LLM relevance judge** that falls back safely on error |
+| Malay questions reaching English sources | Hits per query, by language | "pembezaan" (differentiation) returned **0/6** Add Maths chunks. The query glossary improved **6 of 13** test queries and made **0** worse |
+| "Guide, don't tell" over-applied | Full pipeline on the 119-item golden set | Correctness **0.643 → 0.752** and faithfulness **0.854 → 0.904** once coaching was limited to work the student should do themselves |
+| File-request detection | Paraphrased requests in English and Malay | A keyword list kept missing new phrasings. A model-decided tool call scored **12/12** on two runs, including requests with no file keyword at all |
+| Judging answers reliably | One judge, re-run on the same answers | A single pass/fail verdict flipped on 11 of 82 answers between runs. A claim-by-claim judge whose quotes are checked in code gives stable scores |
+
+Evaluation lives in `src/rag/` (retrieval and answer evaluation, LLM-as-judge with claims checked in code) and `src/scripts/golden-*.ts` (golden-set drafting, checking and upload to Langfuse). `RAG_STATUS.md` logs every experiment and its verdict.
+
+## Project structure
+
+```
+src/
+  lib/        chat handler, LangGraph turn graph, router, retrieval, providers, auth, usage caps, tracing
+  rag/        evaluation harness, hybrid search, index building, rerank experiments
+  ingest/     PDF → chunks → embeddings pipeline, past-year OCR pipelines
+  scripts/    one-off backfills, migrations, eval and golden-set tooling
+  routes/     thin Fastify route wrappers
+frontend/     React + Vite + Tailwind chat UI (KaTeX maths, file panel, teacher upload)
+sql/          schema and migrations (pgvector, HNSW, BM25 / tsvector, retrieval RPCs)
+docs/         turn-graph diagram (Mermaid)
+```
+
+## Running locally
+
+Requires **Node 22+** and a Supabase project with pgvector. `pdftoppm` (poppler) is only needed to OCR scanned PDFs.
 
 ```bash
 # 1. Install
 npm install
-cd frontend && npm install && cd ..
+npm --prefix frontend install
 
-# 2. Configure — fill in both from the examples
-cp .env.example .env                    # SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-                                        # OPENAI_API_KEY, ANTHROPIC_API_KEY, PORT
-cp frontend/.env.example frontend/.env  # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+# 2. Configure
+cp .env.example .env
+#    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+#    plus VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for the frontend
 
-# 3. Create the schema — run sql/schema.sql against your Supabase project,
-#    then the sql/migrate_*.sql files.
+# 3. Database: run sql/schema.sql, then the sql/migrate_*.sql files, in the Supabase SQL editor
 
-# 4. Run everything on one port
-cd frontend && npm run dev              # http://localhost:5173
+# 4. Run UI + API together on http://localhost:5173
+cd frontend && npm run dev
 ```
 
-That last command serves the **whole app** — UI, `/api/chat`, `/api/conversations`,
-`/api/materials`, `/health` — from a single Vite process. A Vite plugin
-(`frontend/vite-plugins/api.ts`) runs the backend logic directly inside Vite's dev server, so
-no separate backend process is needed day to day. Backend secrets stay server-side; that
-plugin never reaches the browser bundle.
+> **Windows:** `npm run dev` calls a Unix shell shim. Run Vite's entry directly instead:
+> `node --env-file=../.env node_modules/vite/bin/vite.js` (from `frontend/`).
 
-The root `.env` is loaded explicitly by `frontend`'s `dev`/`preview` scripts
-(`node --env-file=../.env ...`), because Vite's cwd is `frontend/`, not the project root.
-
-## Commands
-
-From `frontend/`:
+Other commands (from the repo root):
 
 ```bash
-npm run dev      # UI + API on :5173 (the normal way to develop)
-npm run build    # tsc -b && vite build   (see gotcha below)
-npm run lint     # oxlint
+npm run dev         # standalone Fastify API (production shape)
+npm run typecheck   # tsc --noEmit
+npm run ingest -- <file.pdf> --exam-board SPM --subject 'Physics' --topic Electricity [--vision] [--dry-run]
+npm run router:graph  # print the turn graph as Mermaid
 ```
 
-From the project root — the standalone Fastify server, used for production deployment (where
-Vite's dev server doesn't exist) or to run the API on its own port:
+## Notes
 
-```bash
-npm run dev        # tsx watch src/server.ts
-npm run build      # compile to dist/
-npm run start      # node dist/server.js
-npm run typecheck  # tsc --noEmit
-npm run reembed    # re-embed all chunks after an embedding-model change
-
-npm run ingest -- <file.pdf> --exam-board SPM --subject 'Add Maths' --topic Differentiation \
-  [--dry-run] [--vision] [--start-page N] [--end-page N]
-```
-
-There is no automated test suite. Behaviour is verified by measuring against the real
-knowledge base — see *Retrieval* below.
-
-## Architecture
-
-### Two entry points, one implementation
-
-The chat logic lives once, in `src/lib/chat-handler.ts`, and is called from two places so it
-can never drift into two copies:
-
-1. **`src/server.ts`** → thin route wrappers in `src/routes/` — the production shape.
-2. **`frontend/vite-plugins/api.ts`** — the same `src/lib/*` functions mounted as middleware
-   on Vite's dev server. Local development only; production still needs the Fastify server
-   deployed as its own process.
-
-### Retrieval
-
-Four parallel lanes, merged and deduped into a 12-chunk context block:
-
-| Lane | What it searches | Why it exists |
-|---|---|---|
-| `match_content_chunks` ×2 | whole knowledge base | once on the bare question, once with the prior turn prepended, to resolve follow-ups like "sketch it" |
-| `match_teacher_materials` | teacher uploads only | a few dozen teacher chunks otherwise lose the whole-KB search to thousands of textbook chunks on the same topic |
-| `match_teacher_materials_lexical` | teacher uploads only | IDF-weighted keyword search — catches a student quoting their teacher's exact wording, which dense vectors structurally cannot match |
-
-**The cutoffs in this path are empirically measured, not guessed.** Each constant in
-`chat-handler.ts` carries the probe results that produced it *and* the approaches that were
-built, measured and rejected — `ts_rank`, teacher-subset IDF, a topic-label gate, and running
-the teacher lane on the prior-turn query. Re-measure before changing any of them; several
-plausible-sounding alternatives are provably worse, and the notes exist so nobody has to
-rediscover that.
-
-Teacher PDFs are downloadable **only** from the Materials tab, never offered from a chat turn.
-Retrieval still feeds their content to the tutor so it can teach from them — only the file
-download lives elsewhere.
-
-### Ingestion
-
-`src/ingest/ingest.ts`: extract PDF text per page → batch pages → have `gpt-4.1` split each
-batch into typed chunks (`concept`, `worked_example`, `past_year_question`, `formula`,
-`common_mistake`) → embed → insert.
-
-Chunking of every batch completes before any row is inserted, so a mid-run failure leaves zero
-partial rows and re-running is always safe. `--dry-run` writes the chunks to a JSON file for
-review instead of inserting. `--vision` renders pages with `pdftoppm` and transcribes them
-with a vision model, for scanned PDFs with no usable text layer; results are cached per source
-PDF and are resumable.
-
-Teacher uploads (`src/lib/materials.ts`) run through the *same* `runIngestion()` the CLI uses,
-and auto-detect a scanned PDF so a teacher never has to know about `--vision`.
-
-### Database
-
-`sql/schema.sql` plus the `sql/migrate_*.sql` files, applied in order. Key objects:
-`content_chunks` (the knowledge base, HNSW cosine index), `users` / `conversations` /
-`messages`, `materials`, `usage_daily`, and the three `match_*` retrieval functions.
-
-Vectors from different embedding models are never comparable — mixing them breaks retrieval
-silently, with no error. Model changes therefore go through an add-column → `npm run reembed`
-→ drop-and-rename migration; `sql/migrate_e5_base*.sql` is the worked example.
-
-### Roles and cost control
-
-`users.role` is `'student'` or `'teacher'`, flipped only by a manual DB update. It gates the
-material-upload endpoints and the per-student daily spend cap
-(`STUDENT_DAILY_BUDGET_USD`, checked before any model call, computed from real token usage).
-
-## Gotchas
-
-- **`npm run build` in `frontend/` fails on missing env vars** unless you pass the env file:
-  `node --env-file=../.env node_modules/.bin/vite build`. Only `dev` and `preview` load it.
-- **A stale `OPENAI_API_KEY` can linger in an open shell** even after you change `.env`. If
-  OpenAI calls hang or 401, `unset OPENAI_API_KEY` and restart the dev server.
-- **`onnxruntime-node` is pinned to 1.23.0** via `overrides`; newer versions dropped prebuilt
-  Intel Mac (`darwin-x64`) binaries.
-- **E5 embeddings need asymmetric prefixes.** Use `embedQuery()` for questions and
-  `embedPassage()` for stored chunks — there is deliberately no bare `embed()`, because the
-  wrong one works silently and just retrieves worse.
-
-## Further reading
-
-`CLAUDE.md` carries the detailed architecture notes, the reasoning behind each design
-decision, and the measurements behind the retrieval tuning.
+- The golden evaluation sets, run reports and retrieval set are **not included**. They contain real student questions and licensed course material. The evaluation and ingestion code that produced them is included.
+- Students' questions and answers are traced to Langfuse for review. Images are stripped before export, because the users are school students.
+- `CLAUDE.md` holds the long-form design notes: why each decision was made, what was tried and rejected, and the measurements behind it.
